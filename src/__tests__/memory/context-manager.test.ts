@@ -87,6 +87,31 @@ describe("createTokenCounter", () => {
     expect(counter.cache.has("default::evict-0")).toBe(false);
     expect(counter.cache.has("default::evict-10004")).toBe(true);
   });
+
+  it("counts long single-character runs quickly", () => {
+    const counter = createTokenCounter();
+    const start = Date.now();
+
+    const letters = counter.countTokens("x".repeat(500_000));
+    const punctuation = counter.countTokens("=".repeat(100_000));
+    const spaces = counter.countTokens(" ".repeat(100_000));
+
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(letters).toBeGreaterThanOrEqual(500_000 / 4);
+    expect(punctuation).toBeGreaterThan(0);
+    expect(spaces).toBeGreaterThan(0);
+  });
+
+  it("keeps exact counts for ordinary text around long runs", () => {
+    const counter = createTokenCounter();
+    const prose = "The quick brown fox jumps over the lazy dog.";
+
+    const plain = counter.countTokens(prose);
+    const mixed = counter.countTokens(`${prose} ${"y".repeat(200)} ${prose}`);
+
+    expect(plain).toBe(10);
+    expect(mixed).toBeGreaterThanOrEqual(plain * 2 + 50);
+  });
 });
 
 describe("ContextManager.assembleContext", () => {
