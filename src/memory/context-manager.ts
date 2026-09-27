@@ -128,6 +128,29 @@ function formatCacheKey(text: string, model?: string): string {
   return `${model ?? "default"}::${text}`;
 }
 
+/**
+ * js-tiktoken's BPE merge is quadratic in the length of a single pre-token,
+ * so one long run of letters, punctuation or whitespace (e.g. "x".repeat(50_000))
+ * blocks the event loop for minutes. Digits are pre-split into groups of <= 3,
+ * so base64/hex/URLs stay fast. Long runs are estimated instead of encoded.
+ */
+const LONG_PRETOKEN_RUN = /\p{L}{64,}|[^\s\p{L}\p{N}]{64,}|\s{64,}/gu;
+// Matches the legacy length/4 estimate that estimateTokens() floors at.
+const LONG_RUN_CHARS_PER_TOKEN = 4;
+
+function encodedLength(encoder: Tiktoken, text: string): number {
+  let count = 0;
+  let last = 0;
+  for (const match of text.matchAll(LONG_PRETOKEN_RUN)) {
+    const start = match.index ?? 0;
+    if (start > last) count += encoder.encode(text.slice(last, start)).length;
+    count += Math.ceil(match[0].length / LONG_RUN_CHARS_PER_TOKEN);
+    last = start + match[0].length;
+  }
+  if (last < text.length) count += encoder.encode(text.slice(last)).length;
+  return count;
+}
+
 export function createTokenCounter(): TokenCounter {
   const cache = new Map<string, number>();
   let encoder: Tiktoken | null = null;
@@ -152,7 +175,7 @@ export function createTokenCounter(): TokenCounter {
     let count: number;
     if (encoder) {
       try {
-        count = encoder.encode(normalizedText).length;
+        count = encodedLength(encoder, normalizedText);
       } catch {
         count = Math.ceil(normalizedText.length / 3.5);
       }
